@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/joho/godotenv"
@@ -30,6 +31,17 @@ type TraceResult struct {
 	Gas         uint64      `json:"gas"`
 	ReturnValue string      `json:"returnValue"`
 	StructLogs  []StructLog `json:"structLogs"`
+}
+
+func printWithTimestamp(message string) {
+	// Get the current time
+	currentTime := time.Now()
+
+	// Format the time as needed. Example format: "2006-01-02 15:04:05"
+	timestamp := currentTime.Format("2006-01-02 15:04:05")
+
+	// Print the message with the timestamp
+	fmt.Printf("[%s] %s\n", timestamp, message)
 }
 
 func main() {
@@ -68,7 +80,7 @@ func main() {
 
 	var blockNum int
 	for blockNum = startBlockNum; blockNum <= endBlockNum; blockNum++ {
-		fmt.Println(blockNum)
+		printWithTimestamp(strconv.Itoa(blockNum))
 		var result []map[string]interface{}
 		err = client.CallContext(context.Background(), &result, "debug_traceBlockByNumber", fmt.Sprintf("0x%x", blockNum), map[string]interface{}{})
 		if err != nil {
