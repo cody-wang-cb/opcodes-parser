@@ -60,10 +60,10 @@ func main() {
 	fmt.Println("Chain: ", chain)
 
 	// Load the .env file
-    err := godotenv.Load()
-    if err != nil {
-        log.Fatalf("Error loading .env file")
-    }
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
 
 	var clientLocation string
 	if chain == "base" {
@@ -79,6 +79,11 @@ func main() {
 	}
 
 	var blockNum int
+	opcodes := make(map[string]int)
+	opcodesGasCost := make(map[string]float64)
+	averageOpcodesGasCost := make(map[string]float64)
+	maxOpcodesGasCost := make(map[string]float64)
+	minOpcodesGasCost := make(map[string]float64)
 	for blockNum = startBlockNum; blockNum <= endBlockNum; blockNum++ {
 		printWithTimestamp(strconv.Itoa(blockNum))
 		var result []map[string]interface{}
@@ -86,13 +91,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to trace block: %v", err)
 		}
-
-		opcodes := make(map[string]int)
-		opcodesGasCost := make(map[string]float64)
-		averageOpcodesGasCost := make(map[string]float64)
-		maxOpcodesGasCost := make(map[string]float64)
-		minOpcodesGasCost := make(map[string]float64)
-
 		for _, txTrace := range result {
 			res := txTrace["result"].(map[string]interface{})
 			structLogs := res["structLogs"].([]interface{})
@@ -109,28 +107,27 @@ func main() {
 				}
 			}
 		}
-
-		// Calculate average gas cost for each opcode
-		for opcode, gas := range opcodesGasCost {
-			averageOpcodesGasCost[opcode] = gas / float64(opcodes[opcode])
-		}
-
-		dirName := fmt.Sprintf("./results/%s/%s_%s", chain, strconv.Itoa(startBlockNum), strconv.Itoa(endBlockNum))
-		err := os.MkdirAll(dirName, os.ModePerm)
-		if err != nil {
-			log.Fatalf("Error creating directory: %v", err)
-		}
-
-		writeJSON(opcodes, filepath.Join(dirName, "opcodesDistribution.json"))
-		writeJSON(averageOpcodesGasCost, filepath.Join(dirName, "averageOpcodesGasCost.json"))
-		writeJSON(maxOpcodesGasCost, filepath.Join(dirName, "maxOpcodesGasCost.json"))
-		writeJSON(minOpcodesGasCost, filepath.Join(dirName, "minOpcodesGasCost.json"))
-		writeJSON(opcodesGasCost, filepath.Join(dirName, "totalOpcodesGasCost.json"))
 	}
+
+	// Calculate average gas cost for each opcode
+	for opcode, gas := range opcodesGasCost {
+		averageOpcodesGasCost[opcode] = gas / float64(opcodes[opcode])
+	}
+
+	dirName := fmt.Sprintf("./results/%s/%s_%s", chain, strconv.Itoa(startBlockNum), strconv.Itoa(endBlockNum))
+	err = os.MkdirAll(dirName, os.ModePerm)
+	if err != nil {
+		log.Fatalf("Error creating directory: %v", err)
+	}
+
+	writeJSON(opcodes, filepath.Join(dirName, "opcodesDistribution.json"))
+	writeJSON(averageOpcodesGasCost, filepath.Join(dirName, "averageOpcodesGasCost.json"))
+	writeJSON(maxOpcodesGasCost, filepath.Join(dirName, "maxOpcodesGasCost.json"))
+	writeJSON(minOpcodesGasCost, filepath.Join(dirName, "minOpcodesGasCost.json"))
+	writeJSON(opcodesGasCost, filepath.Join(dirName, "totalOpcodesGasCost.json"))
 
 	defer client.Close()
 }
-
 
 func writeJSON(data interface{}, fileName string) {
 	// Convert map to JSON
