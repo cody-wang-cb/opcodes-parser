@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/joho/godotenv"
 )
 
 type StructLog struct {
@@ -46,11 +47,17 @@ func main() {
 	fmt.Println("End block: ", endBlockNum)
 	fmt.Println("Chain: ", chain)
 
+	// Load the .env file
+    err := godotenv.Load()
+    if err != nil {
+        log.Fatalf("Error loading .env file")
+    }
+
 	var clientLocation string
 	if chain == "base" {
-		clientLocation = "https://base-mainnet..."
+		clientLocation = os.Getenv("BASE_RPC_URL")
 	} else {
-		clientLocation = "https://optimism-mainnet....."
+		clientLocation = os.Getenv("OPTIMISM_RPC_URL")
 	}
 
 	client, err := rpc.Dial(clientLocation)
@@ -80,12 +87,13 @@ func main() {
 			for _, logEntry := range structLogs {
 				log := logEntry.(map[string]interface{})
 				opcodes[log["op"].(string)]++
-				opcodesGasCost[log["op"].(string)] += float64(log["gasCost"].(float64))
-				if maxOpcodesGasCost[log["op"].(string)] < float64(log["gasCost"].(float64)) {
-					maxOpcodesGasCost[log["op"].(string)] = float64(log["gasCost"].(float64))
+				gasCost := float64(log["gasCost"].(float64))
+				opcodesGasCost[log["op"].(string)] += gasCost
+				if maxOpcodesGasCost[log["op"].(string)] < gasCost {
+					maxOpcodesGasCost[log["op"].(string)] = gasCost
 				}
-				if minOpcodesGasCost[log["op"].(string)] == 0 || minOpcodesGasCost[log["op"].(string)] > float64(log["gasCost"].(float64)) {
-					minOpcodesGasCost[log["op"].(string)] = float64(log["gasCost"].(float64))
+				if minOpcodesGasCost[log["op"].(string)] == 0 || minOpcodesGasCost[log["op"].(string)] > gasCost {
+					minOpcodesGasCost[log["op"].(string)] = gasCost
 				}
 			}
 		}
@@ -105,10 +113,12 @@ func main() {
 		writeJSON(averageOpcodesGasCost, filepath.Join(dirName, "averageOpcodesGasCost.json"))
 		writeJSON(maxOpcodesGasCost, filepath.Join(dirName, "maxOpcodesGasCost.json"))
 		writeJSON(minOpcodesGasCost, filepath.Join(dirName, "minOpcodesGasCost.json"))
+		writeJSON(opcodesGasCost, filepath.Join(dirName, "totalOpcodesGasCost.json"))
 	}
 
 	defer client.Close()
 }
+
 
 func writeJSON(data interface{}, fileName string) {
 	// Convert map to JSON
