@@ -15,24 +15,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type StructLog struct {
-	PC      uint64            `json:"pc"`
-	Op      string            `json:"op"`
-	Gas     uint64            `json:"gas"`
-	GasCost uint64            `json:"gasCost"`
-	Depth   int               `json:"depth"`
-	Error   string            `json:"error,omitempty"`
-	Stack   []string          `json:"stack"`
-	Memory  []string          `json:"memory"`
-	Storage map[string]string `json:"storage"`
-}
-
-type TraceResult struct {
-	Gas         uint64      `json:"gas"`
-	ReturnValue string      `json:"returnValue"`
-	StructLogs  []StructLog `json:"structLogs"`
-}
-
 func printWithTimestamp(message string) {
 	// Get the current time
 	currentTime := time.Now()
@@ -87,6 +69,7 @@ func main() {
 	averageOpcodesGasCost := make(map[string]float64)
 	maxOpcodesGasCost := make(map[string]float64)
 	minOpcodesGasCost := make(map[string]float64)
+	individualOpcodesGasCost := make(map[string]map[string]float64)
 
 	if checkpoint > 0 {
 		var err error
@@ -116,12 +99,18 @@ func main() {
 			log.Fatalf("Error loading JSON file: %v", err)
 		}
 
+		individualOpcodesGasCost, err = LoadJSONIntoFloat64NestedMap(filepath.Join(dirName, "individualOpcodesGasCost.json"))
+		if err != nil {
+			log.Fatalf("Error loading JSON file: %v", err)
+		}
+
 		// Output the loaded data for verification
 		fmt.Printf("opcodes: %v\n", opcodes)
 		fmt.Printf("averageOpcodesGasCost: %v\n", averageOpcodesGasCost)
 		fmt.Printf("maxOpcodesGasCost: %v\n", maxOpcodesGasCost)
 		fmt.Printf("minOpcodesGasCost: %v\n", minOpcodesGasCost)
 		fmt.Printf("opcodesGasCost: %v\n", opcodesGasCost)
+		fmt.Printf("individualOpcodesGasCost: %v\n", individualOpcodesGasCost)
 
 		blockNum = checkpoint
 	} else {
@@ -132,13 +121,13 @@ func main() {
 		printWithTimestamp(strconv.Itoa(blockNum))
 
 		// checkpoint every 100 blocks
-		if ((blockNum - startBlockNum) != 0 && (blockNum - startBlockNum) % 100 == 0) {
+		if (blockNum-startBlockNum) != 0 && (blockNum-startBlockNum)%100 == 0 {
 			// Calculate the current average gas cost for each opcode
 			for opcode, gas := range opcodesGasCost {
 				averageOpcodesGasCost[opcode] = gas / float64(opcodes[opcode])
 			}
 			dirName := fmt.Sprintf("./results/%s/%s_%s/%s_%s", chain, strconv.Itoa(startBlockNum), strconv.Itoa(endBlockNum), strconv.Itoa(startBlockNum), strconv.Itoa(blockNum))
-			saveResults(dirName, opcodes, averageOpcodesGasCost, maxOpcodesGasCost, minOpcodesGasCost, opcodesGasCost)
+			saveResults(dirName, opcodes, averageOpcodesGasCost, maxOpcodesGasCost, minOpcodesGasCost, opcodesGasCost, individualOpcodesGasCost)
 		}
 
 		var result []map[string]interface{}
@@ -158,7 +147,7 @@ func main() {
 			}
 			break
 		}
-		
+
 		if numTries == 0 {
 			log.Println("Failed to trace block %d after 2 tries, using tx trace instead", blockNum)
 			var result json.RawMessage
@@ -172,7 +161,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("Failed to unmarshal block: %v", err)
 			}
-			
+
 			txs := block["transactions"]
 			for _, txHash := range txs.([]interface{}) {
 				var txResult map[string]interface{}
@@ -184,6 +173,14 @@ func main() {
 					log := logEntry.(map[string]interface{})
 					opcodes[log["op"].(string)]++
 					gasCost := float64(log["gasCost"].(float64))
+
+					// Add the gas cost to individualOpcodesGasCost, where
+					// {"<OPCODE>": {"<GAS_COST>": <COUNT>}}
+					if individualOpcodesGasCost[log["op"].(string)] == nil {
+						individualOpcodesGasCost[log["op"].(string)] = make(map[string]float64)
+					}
+					individualOpcodesGasCost[log["op"].(string)][strconv.Itoa(int(gasCost))] += 1
+
 					opcodesGasCost[log["op"].(string)] += gasCost
 					if maxOpcodesGasCost[log["op"].(string)] < gasCost {
 						maxOpcodesGasCost[log["op"].(string)] = gasCost
@@ -216,6 +213,10 @@ func main() {
 						if log["depth"].(float64) == prevLog["depth"].(float64) {
 							callGasCost = int(prevLog["gas"].(float64)) - int(log["gas"].(float64))
 						}
+						if individualOpcodesGasCost[callOperation] == nil {
+							individualOpcodesGasCost[callOperation] = make(map[string]float64)
+						}
+						individualOpcodesGasCost[callOperation][strconv.Itoa(int(callGasCost))] += 1
 						opcodesGasCost[callOperation] += float64(callGasCost)
 						if maxOpcodesGasCost[callOperation] < float64(callGasCost) {
 							maxOpcodesGasCost[callOperation] = float64(callGasCost)
@@ -231,7 +232,7 @@ func main() {
 							panic("Negative gas cost")
 						}
 					}
-					
+
 					// If there's a new call, track the total gas for the call and update it in the next log
 					if (log["op"].(string) == "CALL") || (log["op"].(string) == "DELEGATECALL") || (log["op"].(string) == "STATICCALL") {
 						getCallUsedGas = true
@@ -241,6 +242,12 @@ func main() {
 						continue
 					}
 
+					// Add the gas cost to individualOpcodesGasCost, where
+					// {"<OPCODE>": {"<GAS_COST>": <COUNT>}}
+					if individualOpcodesGasCost[log["op"].(string)] == nil {
+						individualOpcodesGasCost[log["op"].(string)] = make(map[string]float64)
+					}
+					individualOpcodesGasCost[log["op"].(string)][strconv.Itoa(int(gasCost))] += 1
 					opcodesGasCost[log["op"].(string)] += gasCost
 					if maxOpcodesGasCost[log["op"].(string)] < gasCost {
 						maxOpcodesGasCost[log["op"].(string)] = gasCost
@@ -260,17 +267,18 @@ func main() {
 	}
 
 	dirName := fmt.Sprintf("./results/%s/%s_%s", chain, strconv.Itoa(startBlockNum), strconv.Itoa(endBlockNum))
-	saveResults(dirName, opcodes, averageOpcodesGasCost, maxOpcodesGasCost, minOpcodesGasCost, opcodesGasCost)
+	saveResults(dirName, opcodes, averageOpcodesGasCost, maxOpcodesGasCost, minOpcodesGasCost, opcodesGasCost, individualOpcodesGasCost)
 
 	defer client.Close()
 }
 
-func saveResults(dirName string, opcodes map[string]int, averageOpcodesGasCost map[string]float64, maxOpcodesGasCost map[string]float64, minOpcodesGasCost map[string]float64, opcodesGasCost map[string]float64) {
+func saveResults(dirName string, opcodes map[string]int, averageOpcodesGasCost map[string]float64, maxOpcodesGasCost map[string]float64, minOpcodesGasCost map[string]float64, opcodesGasCost map[string]float64, individualOpcodesGasCost map[string]map[string]float64) {
 	err := os.MkdirAll(dirName, os.ModePerm)
 	if err != nil {
 		log.Fatalf("Error creating directory: %v", err)
 	}
 
+	writeJSON(individualOpcodesGasCost, filepath.Join(dirName, "individualOpcodesGasCost.json"))
 	writeJSON(opcodes, filepath.Join(dirName, "opcodesDistribution.json"))
 	writeJSON(averageOpcodesGasCost, filepath.Join(dirName, "averageOpcodesGasCost.json"))
 	writeJSON(maxOpcodesGasCost, filepath.Join(dirName, "maxOpcodesGasCost.json"))
@@ -324,6 +332,22 @@ func LoadJSONIntoFloat64Map(filename string) (map[string]float64, error) {
 	defer file.Close()
 
 	var data map[string]float64
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON data: %w", err)
+	}
+
+	return data, nil
+}
+
+func LoadJSONIntoFloat64NestedMap(filename string) (map[string]map[string]float64, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open JSON file: %w", err)
+	}
+	defer file.Close()
+
+	var data map[string]map[string]float64
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&data); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON data: %w", err)
